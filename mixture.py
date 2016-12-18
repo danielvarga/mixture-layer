@@ -55,8 +55,9 @@ class MixtureLayer(Layer):
         variance = 0.0005
         error = (xi - xse) ** 2 + (yi - yse) ** 2
         error /= 2 * variance
-        # BEWARE, max not sum, mnist-specific!
-        return K.max(de * K.exp(-error), axis=1)
+        # this is sum not max, that's better for reconstruction (if negative ds are allowed),
+        # val_loss: 0.0068, but way-way worse for interpolation, it looks like a smoke monster.
+        return K.sum((2 * de - 1) * K.exp(-error), axis=1)
 
     def get_output_shape_for(self, input_shape):
         return (input_shape[0], self.size, self.size)
