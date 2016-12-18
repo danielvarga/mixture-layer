@@ -53,11 +53,22 @@ class MixtureLayer(Layer):
         de  = add_two_dims(densities)
 
         variance = 0.0005
-        error = (xi - xse) ** 2 + (yi - yse) ** 2
-        error /= 2 * variance
-        # this is sum not max, that's better for reconstruction (if negative ds are allowed),
+        if variance is not None:
+            error = (xi - xse) ** 2 / variance + (yi - yse) ** 2 / variance
+        else:
+            # learned diagonal covariance. xv in (0, 1), xv/1000 is a lil' dot tuned to MNIST.
+            error = (xi - xse) ** 2 / (xve/1000) + (yi - yse) ** 2 / (yve/1000)
+        error /= 2
+
+        # avgpooling is better for reconstruction (if negative ds are allowed),
         # val_loss: 0.0068, but way-way worse for interpolation, it looks like a smoke monster.
-        return K.sum((2 * de - 1) * K.exp(-error), axis=1)
+        # Note that fixed variance maxpooling will never generalize beyond MNIST.
+        maxpooling = True
+        if maxpooling:
+            out = K.max(de * K.exp(-error), axis=1)
+        else:
+            out = K.sum((2 * de - 1) * K.exp(-error), axis=1)
+        return out
 
     def get_output_shape_for(self, input_shape):
         return (input_shape[0], self.size, self.size)
