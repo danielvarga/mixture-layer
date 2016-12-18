@@ -45,7 +45,7 @@ class MixtureLayer(Layer):
         de = K.expand_dims(densities)
         de = K.expand_dims(de)
         
-        variance = 0.002
+        variance = 0.0005
         error = (xi - xse) ** 2 + (yi - yse) ** 2
         error /= 2 * variance
         # BEWARE, max not sum, mnist-specific!
@@ -126,7 +126,7 @@ def test_learn():
     nb_features = image_size * image_size
     batch_size = 512
     nb_epoch = 10
-    k = 20
+    k = 300
     nonlinearity = 'relu'
     intermediate_layer_size = 1000
 
