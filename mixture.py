@@ -108,6 +108,19 @@ def displaySet(imageBatch, n, generator, name, flatten_input=False):
     plotImages(result, 2*nsqrt, nsqrt, name)
 
 
+def interpolate(sample_a, sample_b, encoder, decoder, frame_count, output_image_size):
+    latent = encoder.predict(np.array([sample_a, sample_b]).reshape(2, -1))
+    latent_a, latent_b = latent
+
+    latents = []
+    for t in np.linspace(0.0, 1.0, frame_count):
+        l = t*latent_a + (1-t)*latent_b
+        latents.append(l)
+    latents = np.array(latents)
+    interp = decoder.predict(latents)
+    interp = interp.reshape(frame_count, output_image_size, output_image_size)
+    return interp
+
 def test_learn():
     image_size = 28
     nb_features = image_size * image_size
@@ -165,21 +178,15 @@ def test_learn():
     decoder = Model(input=input_gaussians, output=decoder_layer)
     decoder.compile(loss='mse', optimizer=SGD())
 
-    sample_a = 31 # 7
-    sample_b = 43 # 10
+    frame_count = 30
+    output_image_size = 4 * image_size
+    interp = interpolate(X_train[31], X_train[43], encoder, decoder, frame_count, output_image_size)
 
-    latent = encoder.predict(X_train[[sample_a, sample_b]].reshape((2, -1)))
-    latent_a, latent_b = latent
-
-    n = 100
-    latents = []
-    for t in np.linspace(0.0, 1.0, n):
-        l = t*latent_a + (1-t)*latent_b
-        # l[6:, :] = 0
-        latents.append(l)
-    latents = np.array(latents)
-    interp = decoder.predict(latents).reshape(n, output_image_size, output_image_size)
     plotImages(interp, 10, 10, "ae-interp")
 
+    print "Creating frames of animation"
+    for i, interp_i in enumerate(interp):
+        img = Image.fromarray((255 * np.clip(interp_i, 0.0, 1.0)).astype(dtype='uint8'), mode="L")
+        img.save("gif/%03d.gif" % i)
 
 test_learn()
