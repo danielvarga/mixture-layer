@@ -5,7 +5,7 @@ np.random.seed(1337)  # for reproducibility
 from keras.datasets import mnist
 from keras.models import Model
 from keras.layers import Input, Dense, Reshape, Activation
-from keras.optimizers import Adam, RMSprop
+from keras.optimizers import SGD, Adam, RMSprop
 
 from keras import backend as K
 from keras.engine.topology import Layer
@@ -90,10 +90,14 @@ def plotImages(data, n_x, n_y, name):
     img.save(fileName)
 
 
-def displaySet(imageBatch, n, generator, name):
+def displaySet(imageBatch, n, generator, name, flatten_input=False):
     batchSize = imageBatch.shape[0]
     nsqrt = int(np.ceil(np.sqrt(n)))
-    recons = generator.predict(imageBatch.reshape(batchSize, -1), batch_size=batchSize)
+    if flatten_input:
+        net_input = imageBatch.reshape(batchSize, -1)
+    else:
+        net_input = imageBatch
+    recons = generator.predict(net_input, batch_size=batchSize)
     recons = recons.reshape(imageBatch.shape)
 
     mergedSet = np.zeros(shape=[n*2] + list(imageBatch.shape[1:]))
@@ -107,7 +111,7 @@ def displaySet(imageBatch, n, generator, name):
 def test_learn():
     image_size = 28
     nb_features = image_size * image_size
-    batch_size = 32
+    batch_size = 512
     nb_epoch = 10
     k = 20
     nonlinearity = 'relu'
@@ -130,25 +134,49 @@ def test_learn():
     net = inputs
     net = Dense(intermediate_layer_size, activation=nonlinearity)(net)
     net = Dense(intermediate_layer_size, activation=nonlinearity)(net)
+    net = Dense(intermediate_layer_size, activation=nonlinearity)(net)
+    net = Dense(intermediate_layer_size, activation=nonlinearity)(net)
     net = Dense(k * 3, activation='sigmoid')(net)
-    net = Reshape((k, 3))(net)
-    net = MixtureLayer(image_size)(net)
+    gaussians = Reshape((k, 3))(net)
+    net = MixtureLayer(image_size)(gaussians)
     # net = Activation('sigmoid')(net)
     net = Reshape((nb_features,))(net)
     model = Model(input=inputs, output=net)
 
     model.summary()
 
-    model.compile(loss='mse',
-              optimizer=Adam(),
-              metrics=['mse'])
+    model.compile(loss='mse', optimizer=Adam())
 
     history = model.fit(X_train, X_train,
                     batch_size=batch_size, nb_epoch=nb_epoch,
                     verbose=1, validation_data=(X_test, X_test))
 
     n = 400
-    displaySet(X_train[:n].reshape(n, image_size, image_size), n, model, "ae-train")
+    displaySet(X_train[:n].reshape(n, image_size, image_size), n, model, "ae-train", flatten_input=True)
+    displaySet(X_test [:n].reshape(n, image_size, image_size), n, model, "ae-test",  flatten_input=True)
+
+    sample_a = 4 # 7
+    sample_b = 9 # 10
+    encoder = Model(input=inputs, output=gaussians)
+    encoder.compile(loss='mse', optimizer=SGD())
+
+    input_gaussians = Input(shape=(k, 3))
+    decoder_layer = MixtureLayer(image_size)(input_gaussians)
+    decoder_layer = Reshape((nb_features,))(decoder_layer)
+    decoder = Model(input=input_gaussians, output=decoder_layer)
+    decoder.compile(loss='mse', optimizer=SGD())
+
+    latent = encoder.predict(X_train[[sample_a, sample_b]].reshape((2, -1)))
+    latent_a, latent_b = latent
+
+    n = 100
+    latents = []
+    for t in np.linspace(0.0, 1.0, n):
+        l = t*latent_a + (1-t)*latent_b
+        latents.append(l)
+    latents = np.array(latents)
+    interp = decoder.predict(latents).reshape(n, image_size, image_size)
+    plotImages(interp, 10, 10, "ae-interp")
 
 
 test_learn()
