@@ -14,6 +14,8 @@ import tensorflow as tf
 from PIL import Image
 
 
+GAUSS_PARAM_COUNT = 5
+
 class MixtureLayer(Layer):
     def __init__(self, size, **kwargs):
         self.output_dim = 2
@@ -22,32 +24,36 @@ class MixtureLayer(Layer):
 
     def build(self, input_shape):
         assert len(input_shape) == 3
-        assert input_shape[2] == 3 # x, y, density
+        assert input_shape[2] == GAUSS_PARAM_COUNT # x, y, xv, yv, density
         self.k = input_shape[1]
         super(MixtureLayer, self).build(input_shape)  # Be sure to call this somewhere!
 
     def call(self, inp, mask=None):
         k = self.k
         size = self.size
+        assert GAUSS_PARAM_COUNT == 5
         xs = inp[:, :, 0]
         ys = inp[:, :, 1]
-        densities = inp[:, :, 2]
+        xv = inp[:, :, 2]
+        yv = inp[:, :, 3]
+        densities = inp[:, :, 4]
+
         xi = tf.linspace(0.0, 1.0, size)
         xi = tf.reshape(xi, [1, 1, 1, -1])
         xi = tf.tile(xi, [1, k, size, 1])
         # -> xi.shape==(1, k, size, size), xi[0][0] has #size different cols, each col has #size identical numbers in it.
         yi = tf.transpose(xi, [0, 1, 3, 2])
         
-        xse = K.expand_dims(xs)
-        xse = K.expand_dims(xse)
-        yse = K.expand_dims(ys)
-        yse = K.expand_dims(yse)
-        de = K.expand_dims(densities)
-        de = K.expand_dims(de)
-        
-        variance = 0.0005
-        error = (xi - xse) ** 2 + (yi - yse) ** 2
-        error /= 2 * variance
+        def add_two_dims(t):
+            return K.expand_dims(K.expand_dims(t))
+        xse = add_two_dims(xs)
+        yse = add_two_dims(ys)
+        xve = add_two_dims(xv)
+        yve = add_two_dims(yv)
+        de  = add_two_dims(densities)
+
+        error = (xi - xse) ** 2 / xve * 100 + (yi - yse) ** 2 / yve * 100
+        error /= 2
         # BEWARE, max not sum, mnist-specific!
         return K.max(de * K.exp(-error), axis=1)
 
@@ -149,8 +155,8 @@ def test_learn():
     net = Dense(intermediate_layer_size, activation=nonlinearity)(net)
     net = Dense(intermediate_layer_size, activation=nonlinearity)(net)
     net = Dense(intermediate_layer_size, activation=nonlinearity)(net)
-    net = Dense(k * 3, activation='sigmoid')(net)
-    gaussians = Reshape((k, 3))(net)
+    net = Dense(k * GAUSS_PARAM_COUNT, activation='sigmoid')(net)
+    gaussians = Reshape((k, GAUSS_PARAM_COUNT))(net)
     net = MixtureLayer(image_size)(gaussians)
     # net = Activation('sigmoid')(net)
     net = Reshape((nb_features,))(net)
@@ -171,7 +177,7 @@ def test_learn():
     encoder = Model(input=inputs, output=gaussians)
     encoder.compile(loss='mse', optimizer=SGD())
 
-    input_gaussians = Input(shape=(k, 3))
+    input_gaussians = Input(shape=(k, GAUSS_PARAM_COUNT))
     output_image_size = image_size * 4 # It's cheap now!
     decoder_layer = MixtureLayer(output_image_size)(input_gaussians)
     decoder_layer = Reshape((output_image_size*output_image_size,))(decoder_layer)
