@@ -52,8 +52,9 @@ class MixtureLayer(Layer):
         yve = add_two_dims(yv)
         de  = add_two_dims(densities)
 
-        error = (xi - xse) ** 2 / xve * 100 + (yi - yse) ** 2 / yve * 100
-        error /= 2
+        variance = 0.0005
+        error = (xi - xse) ** 2 + (yi - yse) ** 2
+        error /= 2 * variance
         # BEWARE, max not sum, mnist-specific!
         return K.max(de * K.exp(-error), axis=1)
 
