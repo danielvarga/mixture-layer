@@ -45,7 +45,7 @@ class MixtureLayer(Layer):
         de = K.expand_dims(densities)
         de = K.expand_dims(de)
         
-        variance = 0.003
+        variance = 0.002
         error = (xi - xse) ** 2 + (yi - yse) ** 2
         error /= 2 * variance
         # BEWARE, max not sum, mnist-specific!
@@ -114,7 +114,7 @@ def interpolate(sample_a, sample_b, encoder, decoder, frame_count, output_image_
 
     latents = []
     for t in np.linspace(0.0, 1.0, frame_count):
-        l = t*latent_a + (1-t)*latent_b
+        l = (1-t) * latent_a + t * latent_b
         latents.append(l)
     latents = np.array(latents)
     interp = decoder.predict(latents)
@@ -180,13 +180,34 @@ def test_learn():
 
     frame_count = 30
     output_image_size = 4 * image_size
-    interp = interpolate(X_train[31], X_train[43], encoder, decoder, frame_count, output_image_size)
 
+    interp = interpolate(X_train[31], X_train[43], encoder, decoder, frame_count, output_image_size)
     plotImages(interp, 10, 10, "ae-interp")
 
+    anim_phases = 10
+    animation = []
+
+    targets = []
+    def collect(target_digit, anim_phases):
+        i = 0
+        j = 0
+        while j < anim_phases:
+            if y_train[i] == target_digit:
+                targets.append(i)
+                j += 1
+            i += 1
+    collect(3, anim_phases)
+    collect(5, anim_phases)
+    targets += range(anim_phases)
+    print "Animation phase count %d" % len(targets)
+
+    for i in range(len(targets)-1):
+        interp = interpolate(X_train[targets[i]], X_train[targets[i+1]], encoder, decoder, frame_count, output_image_size)
+        animation.extend(interp[:-1])
+
     print "Creating frames of animation"
-    for i, interp_i in enumerate(interp):
-        img = Image.fromarray((255 * np.clip(interp_i, 0.0, 1.0)).astype(dtype='uint8'), mode="L")
+    for i, frame_i in enumerate(animation):
+        img = Image.fromarray((255 * np.clip(frame_i, 0.0, 1.0)).astype(dtype='uint8'), mode="L")
         img.save("gif/%03d.gif" % i)
 
 test_learn()
