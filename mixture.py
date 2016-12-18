@@ -4,7 +4,7 @@ np.random.seed(1337)  # for reproducibility
 
 from keras.datasets import mnist
 from keras.models import Model
-from keras.layers import Input, Dense, Reshape
+from keras.layers import Input, Dense, Reshape, Activation
 from keras.optimizers import Adam, RMSprop
 
 from keras import backend as K
@@ -42,12 +42,14 @@ class MixtureLayer(Layer):
         xse = K.expand_dims(xse)
         yse = K.expand_dims(ys)
         yse = K.expand_dims(yse)
+        de = K.expand_dims(densities)
+        de = K.expand_dims(de)
         
-        variance = 0.01
+        variance = 0.003
         error = (xi - xse) ** 2 + (yi - yse) ** 2
         error /= 2 * variance
-        # TODO densities ignored yet
-        return K.sum(K.exp(-error), axis=1)
+        # BEWARE, max not sum, mnist-specific!
+        return K.max(de * K.exp(-error), axis=1)
 
     def get_output_shape_for(self, input_shape):
         return (input_shape[0], self.size, self.size)
@@ -61,11 +63,45 @@ def test_forward():
     model = Model(input=inputs, output=net)
     out = model.predict([np.expand_dims(inp, 0)])
     out = out[0]
-    print out.shape
-    out *= 255.0 / np.max(out)
+    out = np.clip(out, 0.0, 1.0)
+    out *= 255.0
 
     img = Image.fromarray(out.astype(dtype='uint8'), mode="L")
     img.save("vis.png")
+
+
+def plotImages(data, n_x, n_y, name):
+    height, width = data.shape[1:]
+    height_inc = height + 1
+    width_inc = width + 1
+    n = len(data)
+    if n > n_x*n_y: n = n_x * n_y
+
+    mode = "L"
+    image_data = np.zeros((height_inc * n_y + 1, width_inc * n_x - 1), dtype='uint8')
+    for idx in xrange(n):
+        x = idx % n_x
+        y = idx / n_x
+        sample = data[idx]
+        image_data[height_inc*y:height_inc*y+height, width_inc*x:width_inc*x+width] = 255*sample.clip(0, 0.99999)
+    img = Image.fromarray(image_data,mode=mode)
+    fileName = name + ".png"
+    print "Creating file " + fileName
+    img.save(fileName)
+
+
+def displaySet(imageBatch, n, generator, name):
+    batchSize = imageBatch.shape[0]
+    nsqrt = int(np.ceil(np.sqrt(n)))
+    recons = generator.predict(imageBatch.reshape(batchSize, -1), batch_size=batchSize)
+    recons = recons.reshape(imageBatch.shape)
+
+    mergedSet = np.zeros(shape=[n*2] + list(imageBatch.shape[1:]))
+    for i in range(n):
+        mergedSet[2*i] = imageBatch[i]
+        mergedSet[2*i+1] = recons[i]
+    result = mergedSet.reshape([2*n] + list(imageBatch.shape[1:]))
+    plotImages(result, 2*nsqrt, nsqrt, name)
 
 
 def test_learn():
@@ -73,9 +109,9 @@ def test_learn():
     nb_features = image_size * image_size
     batch_size = 32
     nb_epoch = 10
-    k = 10
+    k = 20
     nonlinearity = 'relu'
-    intermediate_layer_size = 100
+    intermediate_layer_size = 1000
 
     # The data, shuffled and split between train and test sets
     (X_train, y_train), (X_test, y_test) = mnist.load_data()
@@ -91,10 +127,13 @@ def test_learn():
     X_test /= 255
 
     inputs = Input(shape=(nb_features,))
-    net = Dense(intermediate_layer_size, activation=nonlinearity)(inputs)
-    net = Dense(k * 3, activation=nonlinearity)(net)
+    net = inputs
+    net = Dense(intermediate_layer_size, activation=nonlinearity)(net)
+    net = Dense(intermediate_layer_size, activation=nonlinearity)(net)
+    net = Dense(k * 3, activation='sigmoid')(net)
     net = Reshape((k, 3))(net)
     net = MixtureLayer(image_size)(net)
+    # net = Activation('sigmoid')(net)
     net = Reshape((nb_features,))(net)
     model = Model(input=inputs, output=net)
 
@@ -107,6 +146,9 @@ def test_learn():
     history = model.fit(X_train, X_train,
                     batch_size=batch_size, nb_epoch=nb_epoch,
                     verbose=1, validation_data=(X_test, X_test))
+
+    n = 400
+    displaySet(X_train[:n].reshape(n, image_size, image_size), n, model, "ae-train")
 
 
 test_learn()
