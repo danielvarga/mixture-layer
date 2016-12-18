@@ -155,16 +155,18 @@ def test_learn():
     displaySet(X_train[:n].reshape(n, image_size, image_size), n, model, "ae-train", flatten_input=True)
     displaySet(X_test [:n].reshape(n, image_size, image_size), n, model, "ae-test",  flatten_input=True)
 
-    sample_a = 4 # 7
-    sample_b = 9 # 10
     encoder = Model(input=inputs, output=gaussians)
     encoder.compile(loss='mse', optimizer=SGD())
 
     input_gaussians = Input(shape=(k, 3))
-    decoder_layer = MixtureLayer(image_size)(input_gaussians)
-    decoder_layer = Reshape((nb_features,))(decoder_layer)
+    output_image_size = image_size * 4 # It's cheap now!
+    decoder_layer = MixtureLayer(output_image_size)(input_gaussians)
+    decoder_layer = Reshape((output_image_size*output_image_size,))(decoder_layer)
     decoder = Model(input=input_gaussians, output=decoder_layer)
     decoder.compile(loss='mse', optimizer=SGD())
+
+    sample_a = 31 # 7
+    sample_b = 43 # 10
 
     latent = encoder.predict(X_train[[sample_a, sample_b]].reshape((2, -1)))
     latent_a, latent_b = latent
@@ -173,9 +175,10 @@ def test_learn():
     latents = []
     for t in np.linspace(0.0, 1.0, n):
         l = t*latent_a + (1-t)*latent_b
+        # l[6:, :] = 0
         latents.append(l)
     latents = np.array(latents)
-    interp = decoder.predict(latents).reshape(n, image_size, image_size)
+    interp = decoder.predict(latents).reshape(n, output_image_size, output_image_size)
     plotImages(interp, 10, 10, "ae-interp")
 
 
