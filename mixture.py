@@ -4,7 +4,8 @@ np.random.seed(1337)  # for reproducibility
 
 from keras.datasets import mnist
 from keras.models import Model
-from keras.layers import Input, Dense, Dropout
+from keras.layers import Input, Dense, Reshape
+from keras.optimizers import Adam, RMSprop
 
 from keras import backend as K
 from keras.engine.topology import Layer
@@ -49,10 +50,10 @@ class MixtureLayer(Layer):
         return K.sum(K.exp(-error), axis=1)
 
     def get_output_shape_for(self, input_shape):
-        return (input_shape[0], self.output_dim)
+        return (input_shape[0], self.size, self.size)
 
 
-def main():
+def test_forward():
     inp = np.array([[0.8, 0.8, 0.5], [0.3, 0.2, 0.5]]) # each row specifies a gaussian, as [x, y, density]
     size = 100
     inputs = Input(shape=inp.shape)
@@ -67,11 +68,15 @@ def main():
     img.save("vis.png")
 
 
-main()
+def test_learn():
+    image_size = 28
+    nb_features = image_size * image_size
+    batch_size = 32
+    nb_epoch = 10
+    k = 10
+    nonlinearity = 'relu'
+    intermediate_layer_size = 100
 
-
-
-def learn():
     # The data, shuffled and split between train and test sets
     (X_train, y_train), (X_test, y_test) = mnist.load_data()
 
@@ -85,9 +90,23 @@ def learn():
     X_train /= 255
     X_test /= 255
 
-    image_size = 28
-    nb_features = image_size * image_size
-    layer_size = 30
-    nonlinearity = 'relu'
     inputs = Input(shape=(nb_features,))
-    net = Dense(layer_size, activation=nonlinearity)(inputs)
+    net = Dense(intermediate_layer_size, activation=nonlinearity)(inputs)
+    net = Dense(k * 3, activation=nonlinearity)(net)
+    net = Reshape((k, 3))(net)
+    net = MixtureLayer(image_size)(net)
+    net = Reshape((nb_features,))(net)
+    model = Model(input=inputs, output=net)
+
+    model.summary()
+
+    model.compile(loss='mse',
+              optimizer=Adam(),
+              metrics=['mse'])
+
+    history = model.fit(X_train, X_train,
+                    batch_size=batch_size, nb_epoch=nb_epoch,
+                    verbose=1, validation_data=(X_test, X_test))
+
+
+test_learn()
