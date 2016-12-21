@@ -14,6 +14,9 @@ import tensorflow as tf
 from PIL import Image
 
 
+import data
+
+
 GAUSS_PARAM_COUNT = 5
 
 class MixtureLayer(Layer):
@@ -52,12 +55,12 @@ class MixtureLayer(Layer):
         yve = add_two_dims(yv)
         de  = add_two_dims(densities)
 
-        variance = 0.0005
+        variance = None # 0.0005
         if variance is not None:
             error = (xi - xse) ** 2 / variance + (yi - yse) ** 2 / variance
         else:
             # learned diagonal covariance. xv in (0, 1), xv/1000 is a lil' dot tuned to MNIST.
-            error = (xi - xse) ** 2 / (xve/1000) + (yi - yse) ** 2 / (yve/1000)
+            error = (xi - xse) ** 2 / (xve/200) + (yi - yse) ** 2 / (yve/200)
         error /= 2
 
         # avgpooling is better for reconstruction (if negative ds are allowed),
@@ -140,27 +143,33 @@ def interpolate(sample_a, sample_b, encoder, decoder, frame_count, output_image_
     interp = interp.reshape(frame_count, output_image_size, output_image_size)
     return interp
 
+
+def saveModel(model, filePrefix):
+    jsonFile = filePrefix + ".json"
+    weightFile = filePrefix + ".h5"
+    with open(filePrefix + ".json", "w") as json_file:
+        json_file.write(model.to_json())
+    model.save_weights(weightFile)
+    print "Saved model to files {}, {}".format(jsonFile, weightFile)
+
+
 def test_learn():
-    image_size = 28
+    celeba = np.load("/home/csadrian/datasets/celeba6472.npy").astype(np.float32)
+    celeba = celeba[:, 4:-4, :]
+
+    image_size = 64
     nb_features = image_size * image_size
-    batch_size = 512
-    nb_epoch = 10
-    k = 300
+    batch_size = 32
+    nb_epoch = 20
+    k = 1000
     nonlinearity = 'relu'
     intermediate_layer_size = 1000
 
-    # The data, shuffled and split between train and test sets
-    (X_train, y_train), (X_test, y_test) = mnist.load_data()
-
-    # flatten the 28x28 images to arrays of length 28*28:
-    X_train = X_train.reshape(60000, nb_features)
-    X_test = X_test.reshape(10000, nb_features)
-
-    # convert brightness values from bytes to floats between 0 and 1:
-    X_train = X_train.astype('float32')
-    X_test = X_test.astype('float32')
-    X_train /= 255
-    X_test /= 255
+    X_train, X_test = celeba[:100000], celeba[100000:110000]
+    print X_train.shape
+    X_train = X_train.reshape(len(X_train), -1)
+    X_test  = X_test .reshape(len(X_test ), -1)
+    print X_train.shape
 
     inputs = Input(shape=(nb_features,))
     net = inputs
@@ -183,27 +192,28 @@ def test_learn():
                     batch_size=batch_size, nb_epoch=nb_epoch,
                     verbose=1, validation_data=(X_test, X_test))
 
+    saveModel(model, "model")
+
     n = 400
-    displaySet(X_train[:n].reshape(n, image_size, image_size), n, model, "ae-train", flatten_input=True)
-    displaySet(X_test [:n].reshape(n, image_size, image_size), n, model, "ae-test",  flatten_input=True)
+    # displaySet(X_train[:n].reshape(n, image_size, image_size), n, model, "ae-train", flatten_input=True)
+    # displaySet(X_test [:n].reshape(n, image_size, image_size), n, model, "ae-test",  flatten_input=True)
 
     encoder = Model(input=inputs, output=gaussians)
     encoder.compile(loss='mse', optimizer=SGD())
 
     input_gaussians = Input(shape=(k, GAUSS_PARAM_COUNT))
-    output_image_size = image_size * 4 # It's cheap now!
+    output_image_size = image_size * 2 # * 4 # It's cheap now!
     decoder_layer = MixtureLayer(output_image_size)(input_gaussians)
     decoder_layer = Reshape((output_image_size*output_image_size,))(decoder_layer)
     decoder = Model(input=input_gaussians, output=decoder_layer)
     decoder.compile(loss='mse', optimizer=SGD())
 
     frame_count = 30
-    output_image_size = 4 * image_size
 
-    interp = interpolate(X_train[31], X_train[43], encoder, decoder, frame_count, output_image_size)
-    plotImages(interp, 10, 10, "ae-interp")
+    # interp = interpolate(X_train[31], X_train[43], encoder, decoder, frame_count, output_image_size)
+    # plotImages(interp, 10, 10, "ae-interp")
 
-    anim_phases = 10
+    anim_phases = 30
     animation = []
 
     targets = []
@@ -215,8 +225,6 @@ def test_learn():
                 targets.append(i)
                 j += 1
             i += 1
-    collect(3, anim_phases)
-    collect(5, anim_phases)
     targets += range(anim_phases)
     print "Animation phase count %d" % len(targets)
 
