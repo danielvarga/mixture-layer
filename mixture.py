@@ -14,15 +14,18 @@ import tensorflow as tf
 from PIL import Image
 
 
-import data
-
-
 GAUSS_PARAM_COUNT = 5
 
 class MixtureLayer(Layer):
-    def __init__(self, size, **kwargs):
+    # learn_variance==True means that a diagonal covariance matrix is learned.
+    # if learn_variance, then variance arg is interpreted as maximum possible value,
+    # if not, then it's the only possible value.
+    def __init__(self, size, learn_variance=True, variance=1.0/200, maxpooling=True, **kwargs):
         self.output_dim = 2
         self.size = size
+        self.learn_variance = learn_variance
+        self.variance = variance
+        self.maxpooling = maxpooling
         super(MixtureLayer, self).__init__(**kwargs)
 
     def build(self, input_shape):
@@ -55,19 +58,18 @@ class MixtureLayer(Layer):
         yve = add_two_dims(yv)
         de  = add_two_dims(densities)
 
-        variance = None # 0.0005
-        if variance is not None:
-            error = (xi - xse) ** 2 / variance + (yi - yse) ** 2 / variance
+        if self.learn_variance:
+            # learned diagonal covariance. SD never bigger than 0.07:
+            error = (xi - xse) ** 2 / (xve * self.variance) + (yi - yse) ** 2 / (yve * self.variance)
         else:
-            # learned diagonal covariance. xv in (0, 1), xv/1000 is a lil' dot tuned to MNIST.
-            error = (xi - xse) ** 2 / (xve/200) + (yi - yse) ** 2 / (yve/200)
+            # 0.0005 is a nice little dot useful for learning MNIST
+            error = (xi - xse) ** 2 / self.variance + (yi - yse) ** 2 / self.variance
         error /= 2
 
         # avgpooling is better for reconstruction (if negative ds are allowed),
         # val_loss: 0.0068, but way-way worse for interpolation, it looks like a smoke monster.
         # Note that fixed variance maxpooling will never generalize beyond MNIST.
-        maxpooling = True
-        if maxpooling:
+        if self.maxpooling:
             out = K.max(de * K.exp(-error), axis=1)
         else:
             out = K.sum((2 * de - 1) * K.exp(-error), axis=1)
@@ -153,23 +155,65 @@ def saveModel(model, filePrefix):
     print "Saved model to files {}, {}".format(jsonFile, weightFile)
 
 
-def test_learn():
+def load_mnist():
+    image_size = 28
+    nb_features = image_size * image_size
+
+    # The data, shuffled and split between train and test sets
+    (X_train, y_train), (X_test, y_test) = mnist.load_data()
+
+    # flatten the 28x28 images to arrays of length 28*28:
+    X_train = X_train.reshape(60000, nb_features)
+    X_test = X_test.reshape(10000, nb_features)
+
+    # convert brightness values from bytes to floats between 0 and 1:
+    X_train = X_train.astype('float32')
+    X_test = X_test.astype('float32')
+    X_train /= 255
+    X_test /= 255
+    return image_size, (X_train, y_train), (X_test, y_test)
+
+
+def load_celebabw():
+    image_size = 64
+    nb_features = image_size * image_size
+
     celeba = np.load("/home/csadrian/datasets/celeba6472.npy").astype(np.float32)
     celeba = celeba[:, 4:-4, :]
 
-    image_size = 64
+    X_train, X_test = celeba[:100000], celeba[100000:110000]
+    X_train = X_train.reshape(len(X_train), -1)
+    X_test  = X_test .reshape(len(X_test ), -1)
+
+    return image_size, (X_train, np.zeros(len(X_train), dtype=np.int32)), (X_test, np.zeros(len(X_test), dtype=np.int32))
+
+
+def test_learn():
+    data_source = "celebabw"
+
+    assert data_source in ("mnist", "celebabw")
+    if data_source == "mnist":
+        image_size, (X_train, y_train), (X_test, y_test) = load_mnist()
+    elif data_source == "celebabw":
+        image_size, (X_train, y_train), (X_test, y_test) = load_celebabw()
+
     nb_features = image_size * image_size
-    batch_size = 32
-    nb_epoch = 20
-    k = 1000
+
+    batch_size = 128
+    nb_epoch = 1
+    k = 300
     nonlinearity = 'relu'
     intermediate_layer_size = 1000
 
-    X_train, X_test = celeba[:100000], celeba[100000:110000]
-    print X_train.shape
-    X_train = X_train.reshape(len(X_train), -1)
-    X_test  = X_test .reshape(len(X_test ), -1)
-    print X_train.shape
+    if data_source == "mnist":
+        learn_variance = False
+        variance = 0.0005
+    elif data_source == "celebabw":
+        learn_variance = True
+        variance = 1.0/200 # Interpreted as maximum allowed variance 7% of image size.
+    maxpooling = True
+    
+    mixture_layer = MixtureLayer(image_size, learn_variance=learn_variance, variance=variance, maxpooling=maxpooling)
 
     inputs = Input(shape=(nb_features,))
     net = inputs
@@ -179,8 +223,7 @@ def test_learn():
     net = Dense(intermediate_layer_size, activation=nonlinearity)(net)
     net = Dense(k * GAUSS_PARAM_COUNT, activation='sigmoid')(net)
     gaussians = Reshape((k, GAUSS_PARAM_COUNT))(net)
-    net = MixtureLayer(image_size)(gaussians)
-    # net = Activation('sigmoid')(net)
+    net = mixture_layer(gaussians)
     net = Reshape((nb_features,))(net)
     model = Model(input=inputs, output=net)
 
@@ -194,7 +237,7 @@ def test_learn():
 
     saveModel(model, "model")
 
-    n = 400
+    # n = 400
     # displaySet(X_train[:n].reshape(n, image_size, image_size), n, model, "ae-train", flatten_input=True)
     # displaySet(X_test [:n].reshape(n, image_size, image_size), n, model, "ae-test",  flatten_input=True)
 
@@ -202,8 +245,9 @@ def test_learn():
     encoder.compile(loss='mse', optimizer=SGD())
 
     input_gaussians = Input(shape=(k, GAUSS_PARAM_COUNT))
-    output_image_size = image_size * 2 # * 4 # It's cheap now!
-    decoder_layer = MixtureLayer(output_image_size)(input_gaussians)
+    output_image_size = image_size * 2 # We can increase the resolution
+    mixture_layer_2 = MixtureLayer(output_image_size, learn_variance=learn_variance, variance=variance, maxpooling=maxpooling)
+    decoder_layer = mixture_layer_2(input_gaussians)
     decoder_layer = Reshape((output_image_size*output_image_size,))(decoder_layer)
     decoder = Model(input=input_gaussians, output=decoder_layer)
     decoder.compile(loss='mse', optimizer=SGD())
@@ -213,7 +257,6 @@ def test_learn():
     # interp = interpolate(X_train[31], X_train[43], encoder, decoder, frame_count, output_image_size)
     # plotImages(interp, 10, 10, "ae-interp")
 
-    anim_phases = 30
     animation = []
 
     targets = []
@@ -225,7 +268,16 @@ def test_learn():
                 targets.append(i)
                 j += 1
             i += 1
-    targets += range(anim_phases)
+
+    if data_source == "mnist":
+        anim_phases = 10
+        collect(3, anim_phases)
+        collect(5, anim_phases)
+        targets += range(anim_phases)
+    elif data_source == "celebabw":
+        anim_phases = 30
+        # Not using supervised data
+        targets += range(anim_phases)
     print "Animation phase count %d" % len(targets)
 
     for i in range(len(targets)-1):
