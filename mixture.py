@@ -14,6 +14,9 @@ import tensorflow as tf
 from PIL import Image
 
 
+import data
+
+
 GAUSS_PARAM_COUNT = 5
 
 class MixtureLayer(Layer):
@@ -188,6 +191,64 @@ def load_celebabw():
     return image_size, (X_train, np.zeros(len(X_train), dtype=np.int32)), (X_test, np.zeros(len(X_test), dtype=np.int32))
 
 
+def vis_landmarks(imgs_orig, landmarks, prefix):
+    assert len(imgs_orig)==len(landmarks)
+    assert landmarks.shape[1:] == (5, 2)
+    imgs = np.copy(imgs_orig)
+    for i in range(len(imgs)):
+        face = imgs[i]
+        marks = landmarks[i]
+        for x, y in marks:
+            x, y = int(x), int(y)
+            face[y-1:y+2, x-1:x+2] = 1.0
+    import vis
+    vis.plotImages(np.expand_dims(imgs, 3), 10, 10, prefix)
+
+
+def test_landmarks():
+    shape = (72, 64)
+    celeba_train, celeba_test = data.load_celeba(shape=shape, color=False)
+    landmarks_train, landmarks_test = data.load_landmarks(shape=shape)
+
+    landmarks_train[:, :, 0] /= 64
+    landmarks_train[:, :, 1] /= 72
+    landmarks_test [:, :, 0] /= 64
+    landmarks_test [:, :, 1] /= 72
+
+    X_train_flat = celeba_train.reshape((len(celeba_train), -1))
+    y_train_flat = landmarks_train.reshape((len(landmarks_train), -1))
+    X_test_flat = celeba_test.reshape((len(celeba_test), -1))
+    y_test_flat = landmarks_test.reshape((len(landmarks_test), -1))
+
+    batch_size = 128
+    nb_epoch = 10
+    intermediate_layer_size = 200
+    nonlinearity = "relu"
+    inputs = Input(shape=(shape[0]*shape[1],))
+    net = inputs
+    net = Dense(intermediate_layer_size, activation=nonlinearity)(net)
+    net = Dense(intermediate_layer_size, activation=nonlinearity)(net)
+    net = Dense(intermediate_layer_size, activation=nonlinearity)(net)
+    net = Dense(2*5, activation="sigmoid")(net)
+
+    model = Model(input=inputs, output=net)
+
+    model.summary()
+
+    model.compile(loss='mse', optimizer=Adam())
+
+    history = model.fit(X_train_flat, y_train_flat,
+                    batch_size=batch_size, nb_epoch=nb_epoch,
+                    verbose=1, validation_data=(X_test_flat, y_test_flat))
+
+    y_test_predicted = model.predict(X_test_flat).reshape(-1, 5, 2)
+    y_test_predicted[:, :, 0] *= 64
+    y_test_predicted[:, :, 1] *= 72
+    print y_test_predicted[10:20]
+    vis_landmarks(celeba_test, y_test_predicted, "predicted")
+    vis_landmarks(celeba_test, y_test_predicted[::-1], "predicted_bad")
+
+
 def test_learn():
     data_source = "celebabw"
 
@@ -197,11 +258,15 @@ def test_learn():
     elif data_source == "celebabw":
         image_size, (X_train, y_train), (X_test, y_test) = load_celebabw()
 
+    train_size = None # 10000
+    X_train = X_train[:train_size]
+    y_train = y_train[:train_size]
+
     nb_features = image_size * image_size
 
-    batch_size = 128
+    batch_size = 32
     nb_epoch = 1
-    k = 300
+    k = 600
     nonlinearity = 'relu'
     intermediate_layer_size = 1000
 
@@ -210,7 +275,7 @@ def test_learn():
         variance = 0.0005
     elif data_source == "celebabw":
         learn_variance = True
-        variance = 1.0/200 # Interpreted as maximum allowed variance 7% of image size.
+        variance = 1.0/800 # Interpreted as maximum allowed SD 3.5% of image size.
     maxpooling = True
     
     mixture_layer = MixtureLayer(image_size, learn_variance=learn_variance, variance=variance, maxpooling=maxpooling)
@@ -219,8 +284,8 @@ def test_learn():
     net = inputs
     net = Dense(intermediate_layer_size, activation=nonlinearity)(net)
     net = Dense(intermediate_layer_size, activation=nonlinearity)(net)
-    net = Dense(intermediate_layer_size, activation=nonlinearity)(net)
-    net = Dense(intermediate_layer_size, activation=nonlinearity)(net)
+    net = Dense(intermediate_layer_size / 2, activation=nonlinearity)(net)
+    net = Dense(intermediate_layer_size / 2, activation=nonlinearity)(net)
     net = Dense(k * GAUSS_PARAM_COUNT, activation='sigmoid')(net)
     gaussians = Reshape((k, GAUSS_PARAM_COUNT))(net)
     net = mixture_layer(gaussians)
@@ -289,4 +354,7 @@ def test_learn():
         img = Image.fromarray((255 * np.clip(frame_i, 0.0, 1.0)).astype(dtype='uint8'), mode="L")
         img.save("gif/%03d.gif" % i)
 
+
 test_learn()
+# test_landmarks()
+
