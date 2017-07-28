@@ -181,10 +181,10 @@ def load_celebabw():
     image_size = 64
     nb_features = image_size * image_size
 
-    celeba = np.load("/home/csadrian/datasets/celeba6472.npy").astype(np.float32)
+    celeba = np.load("celeba6472.npy").astype(np.float32)
     celeba = celeba[:, 4:-4, :]
 
-    X_train, X_test = celeba[:100000], celeba[100000:110000]
+    X_train, X_test = celeba[:50000], celeba[50000:55000]
     X_train = X_train.reshape(len(X_train), -1)
     X_test  = X_test .reshape(len(X_test ), -1)
 
