@@ -265,7 +265,7 @@ def test_learn():
     nb_features = image_size * image_size
 
     batch_size = 32
-    epochs = 1
+    epochs = 10
     k = 600
     nonlinearity = 'relu'
     intermediate_layer_size = 1000
@@ -275,8 +275,8 @@ def test_learn():
         variance = 0.0005
     elif data_source == "celebabw":
         learn_variance = True
-        variance = 1.0/800 # Interpreted as maximum allowed SD 3.5% of image size.
-    maxpooling = True
+        variance = 1.0/200 # Interpreted as maximum allowed SD 7% of image size.
+    maxpooling = False
     
     mixture_layer = MixtureLayer(image_size, learn_variance=learn_variance, variance=variance, maxpooling=maxpooling)
 
