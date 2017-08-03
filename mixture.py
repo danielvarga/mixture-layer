@@ -19,67 +19,96 @@ import data
 
 GAUSS_PARAM_COUNT = 5
 
+def get_param_count(learn_variance, learn_density):
+    GAUSS_PARAM_COUNT = 5
+    if not learn_variance: GAUSS_PARAM_COUNT -= 2
+    if not learn_density: GAUSS_PARAM_COUNT -= 1
+    return GAUSS_PARAM_COUNT
+
 class MixtureLayer(Layer):
-    # learn_variance==True means that a diagonal covariance matrix is learned.
-    # if learn_variance, then variance arg is interpreted as maximum possible value,
-    # if not, then it's the only possible value.
-    def __init__(self, size, learn_variance=True, variance=1.0/200, maxpooling=True, **kwargs):
+    def __init__(self, sizeX, sizeY, learn_variance=True, learn_density=False, variance=1.0/200, maxpooling=True, **kwargs):
         self.output_dim = 2
-        self.size = size
+        self.sizeX = sizeX
+        self.sizeY = sizeY
         self.learn_variance = learn_variance
+        self.learn_density = learn_density
         self.variance = variance
         self.maxpooling = maxpooling
+
+        self.xs_index = 0
+        self.ys_index = 1
+        if learn_variance:
+            self.xv_index = 2
+            self.yv_index = 3
+            if learn_density:
+                self.densities_index = 4
+        else:
+            if learn_density:
+                self.densities_index = 2
+
         super(MixtureLayer, self).__init__(**kwargs)
 
+
+    # input_shape = (batch, channels, dots, GAUSS_PARAM_COUNT)
     def build(self, input_shape):
-        assert len(input_shape) == 3
-        assert input_shape[2] == GAUSS_PARAM_COUNT # x, y, xv, yv, density
-        self.k = input_shape[1]
+        assert len(input_shape) == 4
+        #        assert input_shape[3] == self.GAUSS_PARAM_COUNT # x, y, xv, yv, density but the last three could be missing!!!
+        self.k = input_shape[2] # number of dots to place on each channel
         super(MixtureLayer, self).build(input_shape)  # Be sure to call this somewhere!
 
     def call(self, inp, mask=None):
         k = self.k
-        size = self.size
-        assert GAUSS_PARAM_COUNT == 5
-        xs = inp[:, :, 0]
-        ys = inp[:, :, 1]
-        xv = inp[:, :, 2]
-        yv = inp[:, :, 3]
-        densities = inp[:, :, 4]
+        sizeX = self.sizeX
+        sizeY = self.sizeY
 
-        xi = tf.linspace(0.0, 1.0, size)
-        xi = tf.reshape(xi, [1, 1, 1, -1])
-        xi = tf.tile(xi, [1, k, size, 1])
-        # -> xi.shape==(1, k, size, size), xi[0][0] has #size different cols, each col has #size identical numbers in it.
-        yi = tf.transpose(xi, [0, 1, 3, 2])
-        
         def add_two_dims(t):
             return K.expand_dims(K.expand_dims(t))
+
+        xs = inp[:, :, :, self.xs_index]
+        ys = inp[:, :, :, self.ys_index]
         xse = add_two_dims(xs)
         yse = add_two_dims(ys)
-        xve = add_two_dims(xv)
-        yve = add_two_dims(yv)
-        de  = add_two_dims(densities)
+        if self.learn_variance:
+            xv = inp[:, :, :, self.xv_index]
+            yv = inp[:, :, :, self.yv_index]
+            xve = add_two_dims(xv)
+            yve = add_two_dims(yv)
+        if self.learn_density:
+            densities = inp[:, :, :, self.densities_index]
+            de  = add_two_dims(densities)
+        else:
+            print "FIXED DENSITY FOR MIXTURE GAUSSIANS!"
+            de = 1.0
+
+        xi = tf.linspace(0.0, 1.0, sizeX)
+        xi = tf.reshape(xi, [1, 1, 1, -1, 1])
+        xi = tf.tile(xi, [1, 1, k, 1, sizeY])
+        # -> xi.shape==(1, k, sizeX, sizeY), xi[0][0] has #sizeX different rows, each col has #sizeY identical numbers in it.
+        yi = tf.linspace(0.0, 1.0, sizeY)
+        yi = tf.reshape(yi, [1, 1, 1, 1, -1])
+        yi = tf.tile(yi, [1, 1, k, sizeX, 1])
+        
 
         if self.learn_variance:
-            # learned diagonal covariance. SD never bigger than 0.07:
             error = (xi - xse) ** 2 / (xve * self.variance) + (yi - yse) ** 2 / (yve * self.variance)
         else:
-            # 0.0005 is a nice little dot useful for learning MNIST
             error = (xi - xse) ** 2 / self.variance + (yi - yse) ** 2 / self.variance
         error /= 2
+        error = tf.minimum(error, 1)
+        error = tf.maximum(error, -1)
 
         # avgpooling is better for reconstruction (if negative ds are allowed),
         # val_loss: 0.0068, but way-way worse for interpolation, it looks like a smoke monster.
         # Note that fixed variance maxpooling will never generalize beyond MNIST.
         if self.maxpooling:
-            out = K.max(de * K.exp(-error), axis=1)
+            out = K.max(de * K.exp(-error), axis=2)
         else:
-            out = K.sum((2 * de - 1) * K.exp(-error), axis=1)
+            out = K.sum((2 * de - 1) * K.exp(-error), axis=2)
+        out = tf.transpose(out, [0, 2, 3, 1])
         return out
 
     def compute_output_shape(self, input_shape):
-        return (input_shape[0], self.size, self.size)
+        return (input_shape[0], self.sizeX, self.sizeY, input_shape[1])
 
 
 def test_forward():
@@ -278,7 +307,7 @@ def test_learn():
         variance = 1.0/200 # Interpreted as maximum allowed SD 7% of image size.
     maxpooling = False
     
-    mixture_layer = MixtureLayer(image_size, learn_variance=learn_variance, variance=variance, maxpooling=maxpooling)
+    mixture_layer = MixtureLayer(image_size, image_size, learn_variance=learn_variance, variance=variance, maxpooling=maxpooling)
 
     inputs = Input(shape=(nb_features,))
     net = inputs
@@ -287,7 +316,8 @@ def test_learn():
     net = Dense(intermediate_layer_size / 2, activation=nonlinearity)(net)
     net = Dense(intermediate_layer_size / 2, activation=nonlinearity)(net)
     net = Dense(k * GAUSS_PARAM_COUNT, activation='sigmoid')(net)
-    gaussians = Reshape((k, GAUSS_PARAM_COUNT))(net)
+    gaussians = Reshape((1, k, GAUSS_PARAM_COUNT))(net)
+    # input_shape = (batch, channels, dots, GAUSS_PARAM_COUNT)
     net = mixture_layer(gaussians)
     net = Reshape((nb_features,))(net)
     model = Model(input=inputs, output=net)
@@ -311,7 +341,8 @@ def test_learn():
 
     input_gaussians = Input(shape=(k, GAUSS_PARAM_COUNT))
     output_image_size = image_size * 2 # We can increase the resolution
-    mixture_layer_2 = MixtureLayer(output_image_size, learn_variance=learn_variance, variance=variance, maxpooling=maxpooling)
+    mixture_layer_2 = MixtureLayer(output_image_size, output_image_size, 
+	    learn_variance=learn_variance, variance=variance, maxpooling=maxpooling)
     decoder_layer = mixture_layer_2(input_gaussians)
     decoder_layer = Reshape((output_image_size*output_image_size,))(decoder_layer)
     decoder = Model(input=input_gaussians, output=decoder_layer)
