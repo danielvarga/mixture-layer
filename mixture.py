@@ -78,7 +78,7 @@ class MixtureLayer(Layer):
             out = K.sum((2 * de - 1) * K.exp(-error), axis=1)
         return out
 
-    def get_output_shape_for(self, input_shape):
+    def compute_output_shape(self, input_shape):
         return (input_shape[0], self.size, self.size)
 
 
@@ -221,7 +221,7 @@ def test_landmarks():
     y_test_flat = landmarks_test.reshape((len(landmarks_test), -1))
 
     batch_size = 128
-    nb_epoch = 10
+    epochs = 10
     intermediate_layer_size = 200
     nonlinearity = "relu"
     inputs = Input(shape=(shape[0]*shape[1],))
@@ -238,7 +238,7 @@ def test_landmarks():
     model.compile(loss='mse', optimizer=Adam())
 
     history = model.fit(X_train_flat, y_train_flat,
-                    batch_size=batch_size, nb_epoch=nb_epoch,
+                    batch_size=batch_size, epochs=epochs,
                     verbose=1, validation_data=(X_test_flat, y_test_flat))
 
     y_test_predicted = model.predict(X_test_flat).reshape(-1, 5, 2)
@@ -265,7 +265,7 @@ def test_learn():
     nb_features = image_size * image_size
 
     batch_size = 32
-    nb_epoch = 1
+    epochs = 1
     k = 600
     nonlinearity = 'relu'
     intermediate_layer_size = 1000
@@ -297,7 +297,7 @@ def test_learn():
     model.compile(loss='mse', optimizer=Adam())
 
     history = model.fit(X_train, X_train,
-                    batch_size=batch_size, nb_epoch=nb_epoch,
+                    batch_size=batch_size, epochs=epochs,
                     verbose=1, validation_data=(X_test, X_test))
 
     saveModel(model, "model")

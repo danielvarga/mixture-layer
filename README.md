@@ -1,2 +1,3 @@
 # mixture-layer
-Keras Gaussian mixture layer
+
+Keras Radial Basis Layer
