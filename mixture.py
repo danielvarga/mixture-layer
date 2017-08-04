@@ -17,13 +17,13 @@ from PIL import Image
 import data
 
 
-GAUSS_PARAM_COUNT = 5
-
 def get_param_count(learn_variance, learn_density):
-    GAUSS_PARAM_COUNT = 5
-    if not learn_variance: GAUSS_PARAM_COUNT -= 2
-    if not learn_density: GAUSS_PARAM_COUNT -= 1
-    return GAUSS_PARAM_COUNT
+    gauss_param_count = 5
+    if not learn_variance:
+	gauss_param_count -= 2
+    if not learn_density:
+	gauss_param_count -= 1
+    return gauss_param_count
 
 class MixtureLayer(Layer):
     def __init__(self, sizeX, sizeY, learn_variance=True, learn_density=False, variance=1.0/200, maxpooling=True, **kwargs):
@@ -302,12 +302,15 @@ def test_learn():
     if data_source == "mnist":
         learn_variance = False
         variance = 0.0005
+	learn_density = False
     elif data_source == "celebabw":
         learn_variance = True
         variance = 1.0/200 # Interpreted as maximum allowed SD 7% of image size.
-    maxpooling = False
+	learn_density = True
+    maxpooling = True
     
-    mixture_layer = MixtureLayer(image_size, image_size, learn_variance=learn_variance, variance=variance, maxpooling=maxpooling)
+    mixture_layer = MixtureLayer(image_size, image_size, learn_density=learn_density,
+	    learn_variance=learn_variance, variance=variance, maxpooling=maxpooling)
 
     inputs = Input(shape=(nb_features,))
     net = inputs
@@ -315,9 +318,12 @@ def test_learn():
     net = Dense(intermediate_layer_size, activation=nonlinearity)(net)
     net = Dense(intermediate_layer_size / 2, activation=nonlinearity)(net)
     net = Dense(intermediate_layer_size / 2, activation=nonlinearity)(net)
-    net = Dense(k * GAUSS_PARAM_COUNT, activation='sigmoid')(net)
-    gaussians = Reshape((1, k, GAUSS_PARAM_COUNT))(net)
-    # input_shape = (batch, channels, dots, GAUSS_PARAM_COUNT)
+
+    gauss_param_count = get_param_count(learn_variance, learn_density)
+
+    net = Dense(k * gauss_param_count, activation='sigmoid')(net)
+    gaussians = Reshape((1, k, gauss_param_count))(net)
+    # input_shape = (batch, channels, dots, gauss_param_count)
     net = mixture_layer(gaussians)
     net = Reshape((nb_features,))(net)
     model = Model(input=inputs, output=net)
@@ -339,9 +345,9 @@ def test_learn():
     encoder = Model(input=inputs, output=gaussians)
     encoder.compile(loss='mse', optimizer=SGD())
 
-    input_gaussians = Input(shape=(1, k, GAUSS_PARAM_COUNT))
+    input_gaussians = Input(shape=(1, k, gauss_param_count))
     output_image_size = image_size * 2 # We can increase the resolution
-    mixture_layer_2 = MixtureLayer(output_image_size, output_image_size, 
+    mixture_layer_2 = MixtureLayer(output_image_size, output_image_size, learn_density=learn_density,
 	    learn_variance=learn_variance, variance=variance, maxpooling=maxpooling)
     decoder_layer = mixture_layer_2(input_gaussians)
     decoder_layer = Reshape((output_image_size*output_image_size,))(decoder_layer)
