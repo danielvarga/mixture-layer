@@ -339,7 +339,7 @@ def test_learn():
     encoder = Model(input=inputs, output=gaussians)
     encoder.compile(loss='mse', optimizer=SGD())
 
-    input_gaussians = Input(shape=(k, GAUSS_PARAM_COUNT))
+    input_gaussians = Input(shape=(1, k, GAUSS_PARAM_COUNT))
     output_image_size = image_size * 2 # We can increase the resolution
     mixture_layer_2 = MixtureLayer(output_image_size, output_image_size, 
 	    learn_variance=learn_variance, variance=variance, maxpooling=maxpooling)
