@@ -307,8 +307,8 @@ def test_learn():
         learn_variance = True
         variance = 1.0/200 # Interpreted as maximum allowed SD 7% of image size.
 	learn_density = True
-    maxpooling = True
-    
+    maxpooling = False
+
     mixture_layer = MixtureLayer(image_size, image_size, learn_density=learn_density,
 	    learn_variance=learn_variance, variance=variance, maxpooling=maxpooling)
 
