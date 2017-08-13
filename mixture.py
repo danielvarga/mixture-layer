@@ -101,8 +101,10 @@ class MixtureLayer(Layer):
         # val_loss: 0.0068, but way-way worse for interpolation, it looks like a smoke monster.
         # Note that fixed variance maxpooling will never generalize beyond MNIST.
         if self.maxpooling:
+            print "maxpooling"
             out = K.max(de * K.exp(-error), axis=2)
         else:
+            print "avgpooling"
             out = K.sum((2 * de - 1) * K.exp(-error), axis=2)
         out = tf.transpose(out, [0, 2, 3, 1])
         return out
@@ -294,7 +296,7 @@ def test_learn():
     nb_features = image_size * image_size
 
     batch_size = 32
-    epochs = 10
+    epochs = 20
     k = 600
     nonlinearity = 'relu'
     intermediate_layer_size = 1000
