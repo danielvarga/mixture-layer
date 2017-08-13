@@ -166,7 +166,7 @@ def displaySet(imageBatch, n, generator, name, flatten_input=False):
     plotImages(result, 2*nsqrt, nsqrt, name)
 
 
-def interpolate(sample_a, sample_b, encoder, decoder, frame_count, output_image_size):
+def interpolate(sample_a, sample_b, encoder, decoder, frame_count, output_image_size, channels):
     latent = encoder.predict(np.array([sample_a, sample_b]).reshape(2, -1))
     latent_a, latent_b = latent
 
@@ -176,7 +176,7 @@ def interpolate(sample_a, sample_b, encoder, decoder, frame_count, output_image_
         latents.append(l)
     latents = np.array(latents)
     interp = decoder.predict(latents)
-    interp = interp.reshape(frame_count, output_image_size, output_image_size)
+    interp = interp.reshape(frame_count, output_image_size, output_image_size, channels)
     return interp
 
 
@@ -216,6 +216,21 @@ def load_celebabw():
     celeba = celeba[:, 4:-4, :]
 
     X_train, X_test = celeba[:50000], celeba[50000:55000]
+    X_train = X_train.reshape(len(X_train), -1)
+    X_test  = X_test .reshape(len(X_test ), -1)
+
+    return image_size, (X_train, np.zeros(len(X_train), dtype=np.int32)), (X_test, np.zeros(len(X_test), dtype=np.int32))
+
+
+def load_celebacolor():
+    image_size = 64
+    nb_features = image_size * image_size * 3
+
+    celeba = np.load("celeba_72_64_color.npy").astype(np.float32)
+    celeba = celeba[:, 4:-4, :]
+
+    X_train, X_test = celeba[:50000], celeba[50000:55000]
+
     X_train = X_train.reshape(len(X_train), -1)
     X_test  = X_test .reshape(len(X_test ), -1)
 
@@ -281,19 +296,23 @@ def test_landmarks():
 
 
 def test_learn():
-    data_source = "celebabw"
+    data_source = "celebacolor"
 
-    assert data_source in ("mnist", "celebabw")
+    assert data_source in ("mnist", "celebabw", "celebacolor")
     if data_source == "mnist":
         image_size, (X_train, y_train), (X_test, y_test) = load_mnist()
     elif data_source == "celebabw":
         image_size, (X_train, y_train), (X_test, y_test) = load_celebabw()
+    elif data_source == "celebacolor":
+        image_size, (X_train, y_train), (X_test, y_test) = load_celebacolor()
 
     train_size = None # 10000
     X_train = X_train[:train_size]
     y_train = y_train[:train_size]
 
-    nb_features = image_size * image_size
+    channels = 3 if data_source == "celebacolor" else 1
+
+    nb_features = image_size * image_size * channels
 
     batch_size = 32
     epochs = 20
@@ -305,7 +324,7 @@ def test_learn():
         learn_variance = False
         variance = 0.0005
 	learn_density = False
-    elif data_source == "celebabw":
+    elif data_source.startswith("celeba"):
         learn_variance = True
         variance = 1.0/200 # Interpreted as maximum allowed SD 7% of image size.
 	learn_density = True
@@ -323,8 +342,8 @@ def test_learn():
 
     gauss_param_count = get_param_count(learn_variance, learn_density)
 
-    net = Dense(k * gauss_param_count, activation='sigmoid')(net)
-    gaussians = Reshape((1, k, gauss_param_count))(net)
+    net = Dense(channels * k * gauss_param_count, activation='sigmoid')(net)
+    gaussians = Reshape((channels, k, gauss_param_count))(net)
     # input_shape = (batch, channels, dots, gauss_param_count)
     net = mixture_layer(gaussians)
     net = Reshape((nb_features,))(net)
@@ -347,18 +366,18 @@ def test_learn():
     encoder = Model(input=inputs, output=gaussians)
     encoder.compile(loss='mse', optimizer=SGD())
 
-    input_gaussians = Input(shape=(1, k, gauss_param_count))
+    input_gaussians = Input(shape=(channels, k, gauss_param_count))
     output_image_size = image_size * 2 # We can increase the resolution
     mixture_layer_2 = MixtureLayer(output_image_size, output_image_size, learn_density=learn_density,
 	    learn_variance=learn_variance, variance=variance, maxpooling=maxpooling)
     decoder_layer = mixture_layer_2(input_gaussians)
-    decoder_layer = Reshape((output_image_size*output_image_size,))(decoder_layer)
+    decoder_layer = Reshape((output_image_size*output_image_size*channels,))(decoder_layer)
     decoder = Model(input=input_gaussians, output=decoder_layer)
     decoder.compile(loss='mse', optimizer=SGD())
 
     frame_count = 30
 
-    # interp = interpolate(X_train[31], X_train[43], encoder, decoder, frame_count, output_image_size)
+    # interp = interpolate(X_train[31], X_train[43], encoder, decoder, frame_count, output_image_size, channels)
     # plotImages(interp, 10, 10, "ae-interp")
 
     animation = []
@@ -385,7 +404,7 @@ def test_learn():
     print "Animation phase count %d" % len(targets)
 
     for i in range(len(targets)-1):
-        interp = interpolate(X_train[targets[i]], X_train[targets[i+1]], encoder, decoder, frame_count, output_image_size)
+        interp = interpolate(X_train[targets[i]], X_train[targets[i+1]], encoder, decoder, frame_count, output_image_size, channels)
         animation.extend(interp[:-1])
 
     print "Creating frames of animation"
