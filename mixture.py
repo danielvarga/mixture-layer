@@ -6,6 +6,7 @@ from keras.datasets import mnist
 from keras.models import Model
 from keras.layers import Input, Dense, Reshape, Activation
 from keras.optimizers import SGD, Adam, RMSprop
+from keras.callbacks import LambdaCallback
 
 from keras import backend as K
 from keras.engine.topology import Layer
@@ -15,6 +16,7 @@ from PIL import Image
 
 
 import data
+import vis
 
 
 def get_param_count(learn_variance, learn_density):
@@ -128,26 +130,6 @@ def test_forward():
     img.save("vis.png")
 
 
-def plotImages(data, n_x, n_y, name):
-    height, width = data.shape[1:]
-    height_inc = height + 1
-    width_inc = width + 1
-    n = len(data)
-    if n > n_x*n_y: n = n_x * n_y
-
-    mode = "L"
-    image_data = np.zeros((height_inc * n_y + 1, width_inc * n_x - 1), dtype='uint8')
-    for idx in xrange(n):
-        x = idx % n_x
-        y = idx / n_x
-        sample = data[idx]
-        image_data[height_inc*y:height_inc*y+height, width_inc*x:width_inc*x+width] = 255*sample.clip(0, 0.99999)
-    img = Image.fromarray(image_data,mode=mode)
-    fileName = name + ".png"
-    print "Creating file " + fileName
-    img.save(fileName)
-
-
 def displaySet(imageBatch, n, generator, name, flatten_input=False):
     batchSize = imageBatch.shape[0]
     nsqrt = int(np.ceil(np.sqrt(n)))
@@ -163,7 +145,7 @@ def displaySet(imageBatch, n, generator, name, flatten_input=False):
         mergedSet[2*i] = imageBatch[i]
         mergedSet[2*i+1] = recons[i]
     result = mergedSet.reshape([2*n] + list(imageBatch.shape[1:]))
-    plotImages(result, 2*nsqrt, nsqrt, name)
+    vis.plotImages(result, 2*nsqrt, nsqrt, name)
 
 
 def interpolate(sample_a, sample_b, encoder, decoder, frame_count, output_image_size, channels):
@@ -231,8 +213,13 @@ def load_celebacolor():
 
     X_train, X_test = celeba[:50000], celeba[50000:55000]
 
+    print "TURNING IT INTO GRAYSCALE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    X_train[:, :, :, 1] = X_train[:, :, :, 0]
+    X_train[:, :, :, 2] = X_train[:, :, :, 0]
+
     X_train = X_train.reshape(len(X_train), -1)
     X_test  = X_test .reshape(len(X_test ), -1)
+
 
     return image_size, (X_train, np.zeros(len(X_train), dtype=np.int32)), (X_test, np.zeros(len(X_test), dtype=np.int32))
 
@@ -353,15 +340,6 @@ def test_learn():
 
     model.compile(loss='mse', optimizer=Adam())
 
-    history = model.fit(X_train, X_train,
-                    batch_size=batch_size, epochs=epochs,
-                    verbose=1, validation_data=(X_test, X_test))
-
-    saveModel(model, "model")
-
-    # n = 400
-    # displaySet(X_train[:n].reshape(n, image_size, image_size), n, model, "ae-train", flatten_input=True)
-    # displaySet(X_test [:n].reshape(n, image_size, image_size), n, model, "ae-test",  flatten_input=True)
 
     encoder = Model(input=inputs, output=gaussians)
     encoder.compile(loss='mse', optimizer=SGD())
@@ -369,16 +347,34 @@ def test_learn():
     input_gaussians = Input(shape=(channels, k, gauss_param_count))
     output_image_size = image_size * 2 # We can increase the resolution
     mixture_layer_2 = MixtureLayer(output_image_size, output_image_size, learn_density=learn_density,
-	    learn_variance=learn_variance, variance=variance, maxpooling=maxpooling)
+                                    learn_variance=learn_variance, variance=variance, maxpooling=maxpooling)
     decoder_layer = mixture_layer_2(input_gaussians)
     decoder_layer = Reshape((output_image_size*output_image_size*channels,))(decoder_layer)
     decoder = Model(input=input_gaussians, output=decoder_layer)
     decoder.compile(loss='mse', optimizer=SGD())
 
+    def image_write_callback(epoch, logs):
+        image_count = 40
+        data = X_test[:image_count]
+        out = model.predict(data.reshape(image_count, -1)).reshape((image_count, image_size, image_size, channels))
+        vis.plotImages(out, 8, 5, "test-%03d" % epoch)
+
+    history = model.fit(X_train, X_train,
+                    batch_size=batch_size, epochs=epochs,
+                    verbose=1, validation_data=(X_test, X_test),
+                    callbacks=[LambdaCallback(on_epoch_begin=image_write_callback)])
+
+    saveModel(model, "model")
+
+    # n = 400
+    # displaySet(X_train[:n].reshape(n, image_size, image_size), n, model, "ae-train", flatten_input=True)
+    # displaySet(X_test [:n].reshape(n, image_size, image_size), n, model, "ae-test",  flatten_input=True)
+
+
     frame_count = 30
 
     # interp = interpolate(X_train[31], X_train[43], encoder, decoder, frame_count, output_image_size, channels)
-    # plotImages(interp, 10, 10, "ae-interp")
+    # vis.plotImages(interp, 10, 10, "ae-interp")
 
     animation = []
 
