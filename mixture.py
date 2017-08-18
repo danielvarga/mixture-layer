@@ -208,14 +208,10 @@ def load_celebacolor():
     image_size = 64
     nb_features = image_size * image_size * 3
 
-    celeba = np.load("celeba_72_64_color.npy").astype(np.float32)
+    celeba = np.load("celeba_72_64_color.npy").astype(np.float32) / 255
     celeba = celeba[:, 4:-4, :]
 
     X_train, X_test = celeba[:50000], celeba[50000:55000]
-
-    print "TURNING IT INTO GRAYSCALE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-    X_train[:, :, :, 1] = X_train[:, :, :, 0]
-    X_train[:, :, :, 2] = X_train[:, :, :, 0]
 
     X_train = X_train.reshape(len(X_train), -1)
     X_test  = X_test .reshape(len(X_test ), -1)
@@ -302,7 +298,7 @@ def test_learn():
     nb_features = image_size * image_size * channels
 
     batch_size = 32
-    epochs = 20
+    epochs = 40
     k = 600
     nonlinearity = 'relu'
     intermediate_layer_size = 1000
@@ -339,7 +335,6 @@ def test_learn():
     model.summary()
 
     model.compile(loss='mse', optimizer=Adam())
-
 
     encoder = Model(input=inputs, output=gaussians)
     encoder.compile(loss='mse', optimizer=SGD())
@@ -393,7 +388,7 @@ def test_learn():
         collect(3, anim_phases)
         collect(5, anim_phases)
         targets += range(anim_phases)
-    elif data_source == "celebabw":
+    elif data_source.startswith("celeba"):
         anim_phases = 30
         # Not using supervised data
         targets += range(anim_phases)
@@ -405,8 +400,13 @@ def test_learn():
 
     print "Creating frames of animation"
     for i, frame_i in enumerate(animation):
-        img = Image.fromarray((255 * np.clip(frame_i, 0.0, 1.0)).astype(dtype='uint8'), mode="L")
-        img.save("gif/%03d.gif" % i)
+        frame_i = (255 * np.clip(frame_i, 0.0, 1.0)).astype(dtype='uint8')
+        if channels==1:
+            img = Image.fromarray(frame_i[:, :, 0], mode="L")
+        else:
+            assert channels==3
+            img = Image.fromarray(frame_i, mode="RGB")
+        img.save("gif/%03d.png" % i)
 
 
 test_learn()
